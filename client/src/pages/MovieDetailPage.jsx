@@ -144,25 +144,28 @@ const dates = [
               </div>
 
               {movie.trailer ? (
-                <div className="mt-7 overflow-hidden rounded-xl border border-ink-700 bg-black">
-                  <ReactPlayer url={movie.trailer} width="100%" controls light={movie.backdrop || movie.poster} />
-                </div>
-              ) : null}
+  <div
+    id="trailer"
+    className="mt-7 overflow-hidden rounded-xl border border-ink-700 bg-black"
+  >
+    <ReactPlayer
+      url={movie.trailer}
+      width="100%"
+      controls
+      light={movie.backdrop || movie.poster}
+    />
+  </div>
+) : null}
 
               <div className="mt-7 flex flex-wrap items-center gap-3">
                 <a href="#shows" className="btn-primary">
                   Book tickets <ArrowRight className="h-4 w-4" />
                 </a>
                 {movie.trailer ? (
-                  <a
-                    href={movie.trailer}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="btn-outline"
-                  >
-                    <Play className="h-4 w-4 fill-current" /> Watch trailer
-                  </a>
-                ) : null}
+  <a href="#trailer" className="btn-outline">
+    <Play className="h-4 w-4 fill-current" /> Watch trailer
+  </a>
+) : null}
                 <button onClick={handleFav} className="btn-outline" type="button">
                   <Heart className={`h-4 w-4 ${fav ? 'fill-brand-500 text-brand-500' : ''}`} />
                   {fav ? 'In favorites' : 'Add to favorites'}
