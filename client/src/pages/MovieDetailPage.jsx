@@ -12,7 +12,6 @@ import ErrorState from '../components/ErrorState.jsx';
 import MovieCard from '../components/MovieCard.jsx';
 import EmptyState from '../components/EmptyState.jsx';
 import { formatDuration, formatShowDate, formatTime, formatCurrency } from '../lib/formatters.js';
-
 export default function MovieDetailPage() {
   const { movieId } = useParams();
   const navigate = useNavigate();
