@@ -7,12 +7,24 @@ import {
   releaseSeatsForBooking,
 } from '../services/booking.service.js';
 
-const POPULATE = [
-  { path: 'movie', select: 'title poster duration language rating genre' },
-  { path: 'cinema', select: 'name city address' },
-  { path: 'screen', select: 'name screenNumber screenType' },
-  { path: 'show', select: 'date startTime endTime ticketPrice status' },
-];
+const populateBooking = async (booking) => {
+  await booking.populate([
+    {
+      path: 'cinema',
+      select: 'name city address',
+    },
+    {
+      path: 'screen',
+      select: 'name screenNumber screenType',
+    },
+    {
+      path: 'show',
+      select: 'date startTime endTime ticketPrice status',
+    },
+  ]);
+
+  return booking;
+};
 
 export const createBooking = asyncHandler(async (req, res) => {
   const { showId, seats } = req.body;
@@ -23,89 +35,151 @@ export const createBooking = asyncHandler(async (req, res) => {
     seatNumbers: seats,
   });
 
-  await booking.populate(POPULATE);
+  await populateBooking(booking);
 
-  return created(res, { booking }, 'Seats reserved — complete payment to confirm');
+  return created(
+    res,
+    { booking },
+    'Seats reserved — complete payment to confirm'
+  );
 });
 
 export const getBooking = asyncHandler(async (req, res) => {
-  const booking = await Booking.findById(req.params.id).populate(POPULATE);
-  if (!booking) throw ApiError.notFound('Booking not found');
+  const booking = await Booking.findById(req.params.id);
 
-  const isOwner = booking.user.toString() === req.user._id.toString();
-  if (!isOwner && req.user.role !== 'ADMIN') throw ApiError.forbidden();
+  if (!booking) {
+    throw ApiError.notFound('Booking not found');
+  }
+
+  const isOwner =
+    booking.user.toString() === req.user._id.toString();
+
+  if (!isOwner && req.user.role !== 'ADMIN') {
+    throw ApiError.forbidden();
+  }
+
+  await populateBooking(booking);
 
   return ok(res, { booking });
 });
 
 export const listMyBookings = asyncHandler(async (req, res) => {
-  const { status, page = 1, limit = 20 } = req.query;
+  const {
+    status,
+    page = 1,
+    limit = 20,
+  } = req.query;
 
-  const filter = { user: req.user._id };
-  if (status) filter.bookingStatus = status;
+  const pageNumber = Number(page) || 1;
+  const limitNumber = Number(limit) || 20;
 
-  const skip = (page - 1) * limit;
+  const filter = {
+    user: req.user._id,
+  };
+
+  if (status) {
+    filter.bookingStatus = status;
+  }
+
+  const skip = (pageNumber - 1) * limitNumber;
+
   const [bookings, total] = await Promise.all([
     Booking.find(filter)
       .sort({ createdAt: -1 })
       .skip(skip)
-      .limit(limit)
-      .populate(POPULATE),
+      .limit(limitNumber)
+      .populate({
+        path: 'cinema',
+        select: 'name city address',
+      })
+      .populate({
+        path: 'screen',
+        select: 'name screenNumber screenType',
+      })
+      .populate({
+        path: 'show',
+        select: 'date startTime endTime ticketPrice status',
+      }),
     Booking.countDocuments(filter),
   ]);
 
   return ok(res, {
     bookings,
-    pagination: { page, limit, total, pages: Math.ceil(total / limit) },
+    pagination: {
+      page: pageNumber,
+      limit: limitNumber,
+      total,
+      pages: Math.ceil(total / limitNumber),
+    },
   });
 });
 
 export const cancelBooking = asyncHandler(async (req, res) => {
   const booking = await Booking.findById(req.params.id);
-  if (!booking) throw ApiError.notFound('Booking not found');
 
-  const isOwner = booking.user.toString() === req.user._id.toString();
-  if (!isOwner && req.user.role !== 'ADMIN') throw ApiError.forbidden();
+  if (!booking) {
+    throw ApiError.notFound('Booking not found');
+  }
+
+  const isOwner =
+    booking.user.toString() === req.user._id.toString();
+
+  if (!isOwner && req.user.role !== 'ADMIN') {
+    throw ApiError.forbidden();
+  }
 
   if (booking.bookingStatus === 'cancelled') {
     throw ApiError.badRequest('Booking is already cancelled');
   }
+
   if (booking.paymentStatus === 'paid') {
     throw ApiError.badRequest(
-      'Paid bookings cannot be cancelled via this endpoint — request a refund instead'
+      'Paid bookings cannot be cancelled through this endpoint. Request a refund instead.'
     );
   }
 
   booking.bookingStatus = 'cancelled';
   booking.cancelledAt = new Date();
+
   await booking.save();
 
   await releaseSeatsForBooking(booking._id);
 
-  return ok(res, { booking }, 'Booking cancelled');
+  await populateBooking(booking);
+
+  return ok(
+    res,
+    { booking },
+    'Booking cancelled'
+  );
 });
 
 export const retryInfo = asyncHandler(async (req, res) => {
   const booking = await Booking.findById(req.params.id);
-  if (!booking) throw ApiError.notFound('Booking not found');
 
-  const isOwner = booking.user.toString() === req.user._id.toString();
-  if (!isOwner && req.user.role !== 'ADMIN') throw ApiError.forbidden();
+  if (!booking) {
+    throw ApiError.notFound('Booking not found');
+  }
 
-  const now = new Date();
+  const isOwner =
+    booking.user.toString() === req.user._id.toString();
+
+  if (!isOwner && req.user.role !== 'ADMIN') {
+    throw ApiError.forbidden();
+  }
+
   const canRetry =
     booking.bookingStatus === 'pending' &&
     booking.paymentStatus === 'pending' &&
-    booking.reservationExpiresAt > now;
+    booking.reservationExpiresAt &&
+    booking.reservationExpiresAt > new Date();
 
   return ok(res, {
     canRetry,
-    bookingStatus: booking.bookingStatus,
+    bookingId: booking._id,
+    bookingReference: booking.bookingReference,
     paymentStatus: booking.paymentStatus,
+    bookingStatus: booking.bookingStatus,
     reservationExpiresAt: booking.reservationExpiresAt,
-    secondsRemaining: Math.max(
-      0,
-      Math.floor((booking.reservationExpiresAt - now) / 1000)
-    ),
   });
 });

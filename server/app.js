@@ -4,7 +4,6 @@ import helmet from 'helmet';
 import morgan from 'morgan';
 import cookieParser from 'cookie-parser';
 
-import { connectDB } from './config/db.js';
 import { apiRouter } from './routes/index.js';
 import { stripeWebhookHandler } from './controllers/payment.controller.js';
 import { errorHandler, notFound } from './middleware/error.middleware.js';
@@ -13,29 +12,41 @@ const app = express();
 
 app.use(helmet());
 
-const allowedOrigins = [process.env.CLIENT_URL, 'http://localhost:5173'].filter(Boolean);
+const allowedOrigins = [
+  process.env.CLIENT_URL,
+  'http://localhost:5173',
+].filter(Boolean);
 
 app.use(
   cors({
     origin(origin, cb) {
       if (!origin) return cb(null, true);
       if (allowedOrigins.includes(origin)) return cb(null, true);
+
       try {
         const { hostname } = new URL(origin);
-        if (hostname.endsWith('.vercel.app')) return cb(null, true);
-      } catch {
-        /* ignore */
-      }
+
+        if (hostname.endsWith('.vercel.app')) {
+          return cb(null, true);
+        }
+      } catch {}
+
       return cb(new Error(`CORS blocked: ${origin}`));
     },
     credentials: true,
   })
 );
 
-app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
+app.use(
+  morgan(
+    process.env.NODE_ENV === 'production'
+      ? 'combined'
+      : 'dev'
+  )
+);
+
 app.use(cookieParser());
 
-// Stripe webhook must receive the raw body — register BEFORE express.json()
 app.post(
   '/api/payments/webhook',
   express.raw({ type: 'application/json' }),
@@ -45,18 +56,11 @@ app.post(
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-// Ensure DB connected (Vercel serverless cold starts)
-app.use(async (_req, _res, next) => {
-  try {
-    await connectDB();
-    next();
-  } catch (err) {
-    next(err);
-  }
-});
-
 app.get('/', (_req, res) => {
-  res.json({ success: true, message: 'Movie Ticket Booking API is live' });
+  res.json({
+    success: true,
+    message: 'Movie Ticket Booking API is live',
+  });
 });
 
 app.use('/api', apiRouter);

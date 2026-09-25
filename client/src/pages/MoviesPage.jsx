@@ -33,15 +33,31 @@ export default function MoviesPage() {
   const debouncedQ = useDebounce(q, 350);
 
   const { data, loading } = useApi(
-    () => moviesApi.list({ q: debouncedQ || undefined, status: status || undefined, sort, page, limit: 20 }),
+    () =>
+      moviesApi.list({
+        q: debouncedQ || undefined,
+        status: status || undefined,
+        sort,
+        page,
+        limit: 20,
+      }),
     [debouncedQ, status, sort, page]
   );
 
   const movies = data?.data?.movies || [];
-  const pagination = data?.data?.pagination || { page: 1, pages: 1, total: 0 };
+  const pagination = data?.data?.pagination || {
+    page: 1,
+    pages: 1,
+    total: 0,
+  };
 
   const hasActiveFilters = useMemo(
-    () => Boolean(debouncedQ || status || sort !== 'newest'),
+    () =>
+      Boolean(
+        debouncedQ ||
+          status ||
+          sort !== 'newest'
+      ),
     [debouncedQ, status, sort]
   );
 
@@ -56,13 +72,18 @@ export default function MoviesPage() {
     <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
       <PageHeader
         title="Movies"
-        subtitle={pagination.total ? `${pagination.total} titles available` : 'Browse our collection'}
+        subtitle={
+          pagination.total
+            ? `${pagination.total} titles available`
+            : 'Browse our collection'
+        }
       />
 
       <div className="mb-6 space-y-3">
         <div className="flex flex-col gap-3 sm:flex-row">
           <div className="relative flex-1">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-400" />
+
             <input
               type="text"
               value={q}
@@ -74,12 +95,16 @@ export default function MoviesPage() {
               className="input pl-10"
             />
           </div>
+
           <button
             type="button"
-            onClick={() => setShowFilters((v) => !v)}
+            onClick={() =>
+              setShowFilters((value) => !value)
+            }
             className="btn-outline sm:w-auto"
           >
-            <SlidersHorizontal className="h-4 w-4" /> Filters
+            <SlidersHorizontal className="h-4 w-4" />
+            Filters
           </button>
         </div>
 
@@ -126,8 +151,12 @@ export default function MoviesPage() {
             </div>
 
             {hasActiveFilters ? (
-              <button onClick={reset} className="ml-auto btn-ghost text-xs">
-                <X className="h-3.5 w-3.5" /> Clear
+              <button
+                onClick={reset}
+                className="ml-auto btn-ghost text-xs"
+              >
+                <X className="h-3.5 w-3.5" />
+                Clear
               </button>
             ) : null}
           </div>
@@ -146,7 +175,10 @@ export default function MoviesPage() {
           }
           action={
             hasActiveFilters ? (
-              <button className="btn-outline" onClick={reset}>
+              <button
+                className="btn-outline"
+                onClick={reset}
+              >
                 Clear filters
               </button>
             ) : null
@@ -155,26 +187,50 @@ export default function MoviesPage() {
       ) : (
         <>
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-            {movies.map((m) => (
-              <MovieCard key={m._id} movie={m} onFavoriteToggle={(mv) => toggleFavorite(mv._id)} />
+            {movies.map((movie) => (
+              <MovieCard
+                key={movie.tmdbId}
+                movie={movie}
+                onFavoriteToggle={(selectedMovie) =>
+                  toggleFavorite(
+                    selectedMovie.tmdbId
+                  )
+                }
+              />
             ))}
           </div>
 
           {pagination.pages > 1 ? (
             <div className="mt-10 flex items-center justify-center gap-2">
               <button
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                onClick={() =>
+                  setPage((current) =>
+                    Math.max(1, current - 1)
+                  )
+                }
                 disabled={page <= 1}
                 className="btn-outline"
               >
                 Previous
               </button>
+
               <span className="px-4 text-sm text-ink-300">
-                Page {pagination.page} of {pagination.pages}
+                Page {pagination.page} of{' '}
+                {pagination.pages}
               </span>
+
               <button
-                onClick={() => setPage((p) => Math.min(pagination.pages, p + 1))}
-                disabled={page >= pagination.pages}
+                onClick={() =>
+                  setPage((current) =>
+                    Math.min(
+                      pagination.pages,
+                      current + 1
+                    )
+                  )
+                }
+                disabled={
+                  page >= pagination.pages
+                }
                 className="btn-outline"
               >
                 Next

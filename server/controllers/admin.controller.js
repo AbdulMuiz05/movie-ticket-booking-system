@@ -1,5 +1,4 @@
 import { User } from '../models/User.js';
-import { Movie } from '../models/Movie.js';
 import { Cinema } from '../models/Cinema.js';
 import { Screen } from '../models/Screen.js';
 import { Show } from '../models/Show.js';
@@ -8,6 +7,7 @@ import { Payment } from '../models/Payment.js';
 import { ApiError } from '../utils/ApiError.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { ok } from '../utils/response.js';
+import { refundBookingById } from '../services/refund.service.js';
 
 export const getDashboardStats = asyncHandler(async (_req, res) => {
   const now = new Date();
@@ -25,7 +25,7 @@ export const getDashboardStats = asyncHandler(async (_req, res) => {
     revenueAgg,
   ] = await Promise.all([
     User.countDocuments({ active: true }),
-    Movie.countDocuments({ active: true }),
+    Show.distinct('movie.tmdbId').then((ids) => ids.length),
     Cinema.countDocuments({ active: true }),
     Screen.countDocuments({ active: true }),
     Show.countDocuments({}),
@@ -61,7 +61,9 @@ export const listUsers = asyncHandler(async (req, res) => {
   const { role, q, page = 1, limit = 50 } = req.query;
 
   const filter = {};
+
   if (role) filter.role = role;
+
   if (q) {
     filter.$or = [
       { name: new RegExp(q, 'i') },
@@ -70,64 +72,103 @@ export const listUsers = asyncHandler(async (req, res) => {
   }
 
   const skip = (page - 1) * limit;
+
   const [users, total] = await Promise.all([
-    User.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).select('-password'),
+    User.find(filter)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .select('-password'),
     User.countDocuments(filter),
   ]);
 
   return ok(res, {
     users,
-    pagination: { page, limit, total, pages: Math.ceil(total / limit) },
+    pagination: {
+      page,
+      limit,
+      total,
+      pages: Math.ceil(total / limit),
+    },
   });
 });
 
 export const updateUserRole = asyncHandler(async (req, res) => {
   const { role } = req.body;
-  if (!['USER', 'ADMIN'].includes(role)) throw ApiError.badRequest('Invalid role');
+
+  if (!['USER', 'ADMIN'].includes(role)) {
+    throw ApiError.badRequest('Invalid role');
+  }
 
   const user = await User.findById(req.params.id).select('-password');
-  if (!user) throw ApiError.notFound('User not found');
 
-  if (user._id.toString() === req.user._id.toString() && role !== 'ADMIN') {
+  if (!user) {
+    throw ApiError.notFound('User not found');
+  }
+
+  if (
+    user._id.toString() === req.user._id.toString() &&
+    role !== 'ADMIN'
+  ) {
     throw ApiError.badRequest('You cannot demote yourself');
   }
 
   user.role = role;
   await user.save();
-  return ok(res, { user: user.toSafeJSON() }, `Role updated to ${role}`);
+
+  return ok(
+    res,
+    { user: user.toSafeJSON() },
+    `Role updated to ${role}`
+  );
 });
 
 export const setUserActive = asyncHandler(async (req, res) => {
   const { active } = req.body;
-  if (typeof active !== 'boolean') throw ApiError.badRequest('active must be boolean');
+
+  if (typeof active !== 'boolean') {
+    throw ApiError.badRequest('active must be boolean');
+  }
 
   const user = await User.findById(req.params.id).select('-password');
-  if (!user) throw ApiError.notFound('User not found');
 
-  if (user._id.toString() === req.user._id.toString() && active === false) {
+  if (!user) {
+    throw ApiError.notFound('User not found');
+  }
+
+  if (
+    user._id.toString() === req.user._id.toString() &&
+    active === false
+  ) {
     throw ApiError.badRequest('You cannot deactivate yourself');
   }
 
   user.active = active;
   await user.save();
-  return ok(res, { user: user.toSafeJSON() }, active ? 'User activated' : 'User deactivated');
+
+  return ok(
+    res,
+    { user: user.toSafeJSON() },
+    active ? 'User activated' : 'User deactivated'
+  );
 });
 
 export const listAllBookings = asyncHandler(async (req, res) => {
   const { status, paymentStatus, page = 1, limit = 50 } = req.query;
 
   const filter = {};
+
   if (status) filter.bookingStatus = status;
   if (paymentStatus) filter.paymentStatus = paymentStatus;
 
   const skip = (page - 1) * limit;
+
   const [bookings, total] = await Promise.all([
     Booking.find(filter)
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
       .populate('user', 'name email')
-      .populate('movie', 'title poster')
       .populate('cinema', 'name city')
       .populate('screen', 'name screenNumber')
       .populate('show', 'date startTime endTime ticketPrice'),
@@ -136,7 +177,12 @@ export const listAllBookings = asyncHandler(async (req, res) => {
 
   return ok(res, {
     bookings,
-    pagination: { page, limit, total, pages: Math.ceil(total / limit) },
+    pagination: {
+      page,
+      limit,
+      total,
+      pages: Math.ceil(total / limit),
+    },
   });
 });
 
@@ -144,15 +190,16 @@ export const listAllShows = asyncHandler(async (req, res) => {
   const { status, page = 1, limit = 50 } = req.query;
 
   const filter = {};
+
   if (status) filter.status = status;
 
   const skip = (page - 1) * limit;
+
   const [shows, total] = await Promise.all([
     Show.find(filter)
       .sort({ startTime: 1 })
       .skip(skip)
       .limit(limit)
-      .populate('movie', 'title poster duration')
       .populate('cinema', 'name city')
       .populate('screen', 'name screenNumber screenType'),
     Show.countDocuments(filter),
@@ -160,17 +207,30 @@ export const listAllShows = asyncHandler(async (req, res) => {
 
   return ok(res, {
     shows,
-    pagination: { page, limit, total, pages: Math.ceil(total / limit) },
+    pagination: {
+      page,
+      limit,
+      total,
+      pages: Math.ceil(total / limit),
+    },
   });
+});
+
+export const refundBooking = asyncHandler(async (req, res) => {
+  const result = await refundBookingById(req.params.id);
+
+  return ok(res, result, 'Booking refunded');
 });
 
 export const listPayments = asyncHandler(async (req, res) => {
   const { status, page = 1, limit = 50 } = req.query;
 
   const filter = {};
+
   if (status) filter.status = status;
 
   const skip = (page - 1) * limit;
+
   const [payments, total] = await Promise.all([
     Payment.find(filter)
       .sort({ createdAt: -1 })
@@ -186,6 +246,11 @@ export const listPayments = asyncHandler(async (req, res) => {
 
   return ok(res, {
     payments,
-    pagination: { page, limit, total, pages: Math.ceil(total / limit) },
+    pagination: {
+      page,
+      limit,
+      total,
+      pages: Math.ceil(total / limit),
+    },
   });
 });

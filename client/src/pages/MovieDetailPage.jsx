@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
+import ReactPlayer from 'react-player';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   Heart, Star, Clock, Calendar, Play, ArrowRight, MapPin, Building2,
@@ -19,16 +20,24 @@ export default function MovieDetailPage() {
 
   const movieQuery = useApi(() => moviesApi.get(movieId), [movieId]);
   const recQuery = useApi(() => moviesApi.recommended(movieId), [movieId]);
-  const datesQuery = useApi(() => showsApi.availableDates(movieId), [movieId]);
+  const allShowsQuery = useApi(
+  () => showsApi.list({ movieId, status: 'SCHEDULED' }),
+  [movieId]
+);
 
-  const [selectedDate, setSelectedDate] = useState(null);
-  const showsQuery = useApi(
-    () =>
-      selectedDate
-        ? showsApi.list({ movieId, date: selectedDate, status: 'SCHEDULED' })
-        : Promise.resolve({ data: { shows: [] } }),
-    [movieId, selectedDate]
-  );
+const [selectedDate, setSelectedDate] = useState(null);
+
+const showsQuery = useApi(
+  () =>
+    selectedDate
+      ? showsApi.list({
+          movieId,
+          date: selectedDate,
+          status: 'SCHEDULED',
+        })
+      : Promise.resolve({ data: { shows: [] } }),
+  [movieId, selectedDate]
+);
 
   if (movieQuery.loading) return <Loading fullScreen label="Loading movie…" />;
   if (movieQuery.error)
@@ -50,16 +59,24 @@ export default function MovieDetailPage() {
       </div>
     );
 
-  const dates = datesQuery.data?.data?.dates || [];
+const allShows = allShowsQuery.data?.data?.shows || [];
+
+const dates = [
+  ...new Set(
+    allShows.map((show) =>
+      new Date(show.startTime).toISOString().slice(0, 10)
+    )
+  ),
+].sort();
   const shows = showsQuery.data?.data?.shows || [];
-  const fav = isFavorite(movie._id);
+  const fav = isFavorite(movie.tmdbId);
 
   const handleFav = async () => {
     if (!isAuthenticated) {
-      navigate('/login', { state: { from: `/movies/${movie._id}` } });
+      navigate('/login', { state: { from: `/movies/${movie.tmdbId}` } });
       return;
     }
-    await toggleFavorite(movie._id);
+    await toggleFavorite(movie.tmdbId);
   };
 
   const selectSeats = (show) => {
@@ -185,7 +202,7 @@ export default function MovieDetailPage() {
         <h2 className="section-title">Choose a date & show</h2>
         <p className="section-subtitle mt-1">Pick a date to see available shows</p>
 
-        {datesQuery.loading ? (
+        {allShowsQuery.loading ? (
           <div className="mt-6 flex gap-3">
             {[...Array(5)].map((_, i) => (
               <div key={i} className="skeleton h-16 w-24" />
@@ -311,8 +328,12 @@ export default function MovieDetailPage() {
           </div>
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
             {recQuery.data.data.movies.slice(0, 4).map((m) => (
-              <MovieCard key={m._id} movie={m} onFavoriteToggle={(mv) => toggleFavorite(mv._id)} />
-            ))}
+  <MovieCard
+    key={m.tmdbId}
+    movie={m}
+    onFavoriteToggle={(mv) => toggleFavorite(mv.tmdbId)}
+  />
+))}
           </div>
         </section>
       ) : null}

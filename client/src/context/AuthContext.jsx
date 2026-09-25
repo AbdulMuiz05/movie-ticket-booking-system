@@ -21,10 +21,12 @@ export function AuthProvider({ children }) {
 
   const bootstrap = useCallback(async () => {
     const token = getAccessToken();
+
     if (!token) {
       setLoading(false);
       return;
     }
+
     try {
       const res = await authApi.me();
       setUser(res.data.user);
@@ -68,9 +70,8 @@ export function AuthProvider({ children }) {
   const logout = useCallback(async () => {
     try {
       await authApi.logout();
-    } catch {
-      // ignore
-    }
+    } catch {}
+
     setAccessToken(null);
     setUser(null);
     setFavorites([]);
@@ -104,7 +105,11 @@ export function AuthProvider({ children }) {
   );
 
   const isFavorite = useCallback(
-    (movieId) => favorites.some((m) => (m._id || m.id)?.toString() === movieId?.toString()),
+    (movieId) =>
+      favorites.some(
+        (movie) =>
+          movie.tmdbId?.toString() === movieId?.toString()
+      ),
     [favorites]
   );
 
@@ -139,5 +144,9 @@ export function AuthProvider({ children }) {
     ]
   );
 
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+  return (
+    <AuthContext.Provider value={value}>
+      {children}
+    </AuthContext.Provider>
+  );
 }

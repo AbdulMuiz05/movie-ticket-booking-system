@@ -1,215 +1,169 @@
-import mongoose from 'mongoose';
-import { Show } from '../models/Show.js';
-import { Movie } from '../models/Movie.js';
-import { Cinema } from '../models/Cinema.js';
-import { Screen } from '../models/Screen.js';
-import { Seat } from '../models/Seat.js';
 import { ApiError } from '../utils/ApiError.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
-import { ok, created } from '../utils/response.js';
-import { sendShowAddedNotification } from '../services/email.service.js';
-
-const dayRange = (dateInput) => {
-  const d = new Date(dateInput);
-  if (Number.isNaN(d.getTime())) throw ApiError.badRequest('Invalid date');
-  const start = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 0, 0, 0));
-  const end = new Date(start);
-  end.setUTCDate(end.getUTCDate() + 1);
-  return { start, end };
-};
+import { ok } from '../utils/response.js';
+import { Show } from '../models/Show.js';
+import { getTmdbMovieDetails, mapTmdbToMovie } from '../services/tmdb.service.js';
 
 export const listShows = asyncHandler(async (req, res) => {
-  const { movieId, cinemaId, date, status, page = 1, limit = 200 } = req.query;
+  const { movieId, cinemaId, date, status = 'SCHEDULED' } = req.query;
 
-  const filter = {};
+  const filter = { status };
 
-  if (status) {
-    filter.status = status;
-  } else {
-    filter.status = { $ne: 'CANCELLED' };
-    filter.endTime = { $gt: new Date() };
+  if (movieId) {
+    const tmdbMovieId = Number(movieId);
+
+    if (!Number.isInteger(tmdbMovieId) || tmdbMovieId <= 0) {
+      throw ApiError.badRequest('Invalid TMDB movie id');
+    }
+
+    filter['movie.tmdbId'] = tmdbMovieId;
   }
 
-  if (movieId) filter.movie = movieId;
-  if (cinemaId) filter.cinema = cinemaId;
+  if (cinemaId) {
+    filter.cinema = cinemaId;
+  }
+
   if (date) {
-    const { start, end } = dayRange(date);
-    filter.date = { $gte: start, $lt: end };
+    const start = new Date(date);
+
+    if (Number.isNaN(start.getTime())) {
+      throw ApiError.badRequest('Invalid date');
+    }
+
+    const end = new Date(start);
+    end.setDate(end.getDate() + 1);
+
+    filter.startTime = {
+      $gte: start,
+      $lt: end,
+    };
   }
 
-  const skip = (page - 1) * limit;
-  const [shows, total] = await Promise.all([
-    Show.find(filter)
-      .populate('movie', 'title poster duration language rating genre')
-      .populate('cinema', 'name city address')
-      .populate('screen', 'name screenNumber screenType')
-      .sort({ startTime: 1 })
-      .skip(skip)
-      .limit(limit),
-    Show.countDocuments(filter),
-  ]);
+  const shows = await Show.find(filter)
+    .populate('cinema')
+    .populate('screen')
+    .sort({ startTime: 1 })
+    .lean({ virtuals: true });
 
-  return ok(res, {
-    shows,
-    pagination: { page, limit, total, pages: Math.ceil(total / limit) },
-  });
+  return ok(res, { shows });
 });
 
 export const getShow = asyncHandler(async (req, res) => {
   const show = await Show.findById(req.params.id)
-    .populate('movie')
-    .populate('cinema', 'name city address')
-    .populate('screen', 'name screenNumber screenType rows columns');
-  if (!show) throw ApiError.notFound('Show not found');
+    .populate('cinema')
+    .populate('screen')
+    .lean({ virtuals: true });
+
+  if (!show) {
+    throw ApiError.notFound('Show not found');
+  }
+
   return ok(res, { show });
 });
 
 export const createShow = asyncHandler(async (req, res) => {
-  const { movie, cinema, screen, date, startTime, endTime, ticketPrice, status } = req.body;
+  const {
+    tmdbMovieId,
+    cinema,
+    screen,
+    date,
+    startTime,
+    endTime,
+    ticketPrice,
+    totalSeats,
+  } = req.body;
 
-  const [movieDoc, cinemaDoc, screenDoc] = await Promise.all([
-    Movie.findById(movie),
-    Cinema.findById(cinema),
-    Screen.findById(screen),
-  ]);
-
-  if (!movieDoc) throw ApiError.notFound('Movie not found');
-  if (!cinemaDoc) throw ApiError.notFound('Cinema not found');
-  if (!screenDoc) throw ApiError.notFound('Screen not found');
-  if (screenDoc.cinema.toString() !== cinemaDoc._id.toString()) {
-    throw ApiError.badRequest('Screen does not belong to the specified cinema');
+  if (!tmdbMovieId) {
+    throw ApiError.badRequest('TMDB movie id is required');
   }
-  if (!screenDoc.active) throw ApiError.badRequest('Screen is inactive');
 
-  const seatCount = await Seat.countDocuments({ screen: screenDoc._id, status: 'ACTIVE' });
-  if (seatCount === 0) throw ApiError.badRequest('Screen has no active seats');
-
-  const computedEnd = endTime
-    ? new Date(endTime)
-    : new Date(new Date(startTime).getTime() + (movieDoc.duration || 120) * 60 * 1000);
-
-  // Screen double-booking: a screen cannot have two overlapping shows.
-  const overlap = await Show.findOne({
-    screen: screenDoc._id,
-    status: { $ne: 'CANCELLED' },
-    $or: [
-      { startTime: { $lt: computedEnd }, endTime: { $gt: new Date(startTime) } },
-    ],
-  });
-  if (overlap) {
-    throw ApiError.conflict('Screen already booked for an overlapping time');
-  }
+  const movieDetails = await getTmdbMovieDetails(Number(tmdbMovieId));
+  const movie = mapTmdbToMovie(movieDetails);
 
   const show = await Show.create({
-    movie: movieDoc._id,
-    cinema: cinemaDoc._id,
-    screen: screenDoc._id,
-    date: new Date(date),
-    startTime: new Date(startTime),
-    endTime: computedEnd,
+    movie: {
+      tmdbId: movie.tmdbId,
+      title: movie.title,
+      poster: movie.poster,
+      backdrop: movie.backdrop,
+      duration: movie.duration,
+      language: movie.language,
+      rating: movie.rating,
+      genre: movie.genre,
+    },
+    cinema,
+    screen,
+    date,
+    startTime,
+    endTime,
     ticketPrice,
-    totalSeats: seatCount,
-    status: status || 'SCHEDULED',
+    totalSeats,
   });
 
-  const notificationShow = await Show.findById(show._id)
-    .populate('movie', 'title')
-    .populate('cinema', 'name');
-  sendShowAddedNotification(notificationShow).catch((err) =>
-    console.error('[email] new show notification failed:', err.message)
-  );
-
-  return created(res, { show }, 'Show created');
+  return ok(res, { show }, 201);
 });
 
 export const updateShow = asyncHandler(async (req, res) => {
+  const {
+    tmdbMovieId,
+    cinema,
+    screen,
+    date,
+    startTime,
+    endTime,
+    ticketPrice,
+    totalSeats,
+    status,
+  } = req.body;
+
   const show = await Show.findById(req.params.id);
-  if (!show) throw ApiError.notFound('Show not found');
 
-  const { date, startTime, endTime, ticketPrice, status } = req.body;
-
-  if (startTime || endTime) {
-    const newStart = startTime ? new Date(startTime) : show.startTime;
-    const newEnd = endTime
-      ? new Date(endTime)
-      : new Date(newStart.getTime() + (show.endTime - show.startTime));
-
-    const overlap = await Show.findOne({
-      _id: { $ne: show._id },
-      screen: show.screen,
-      status: { $ne: 'CANCELLED' },
-      startTime: { $lt: newEnd },
-      endTime: { $gt: newStart },
-    });
-    if (overlap) throw ApiError.conflict('Screen already booked for an overlapping time');
-
-    show.startTime = newStart;
-    show.endTime = newEnd;
+  if (!show) {
+    throw ApiError.notFound('Show not found');
   }
 
-  if (date !== undefined) show.date = new Date(date);
+  if (tmdbMovieId && Number(tmdbMovieId) !== show.movie.tmdbId) {
+    const movieDetails = await getTmdbMovieDetails(Number(tmdbMovieId));
+    const movie = mapTmdbToMovie(movieDetails);
+
+    show.movie = {
+      tmdbId: movie.tmdbId,
+      title: movie.title,
+      poster: movie.poster,
+      backdrop: movie.backdrop,
+      duration: movie.duration,
+      language: movie.language,
+      rating: movie.rating,
+      genre: movie.genre,
+    };
+  }
+
+  if (cinema !== undefined) show.cinema = cinema;
+  if (screen !== undefined) show.screen = screen;
+  if (date !== undefined) show.date = date;
+  if (startTime !== undefined) show.startTime = startTime;
+  if (endTime !== undefined) show.endTime = endTime;
   if (ticketPrice !== undefined) show.ticketPrice = ticketPrice;
+  if (totalSeats !== undefined) show.totalSeats = totalSeats;
   if (status !== undefined) show.status = status;
 
   await show.save();
-  return ok(res, { show }, 'Show updated');
-});
 
-export const cancelShow = asyncHandler(async (req, res) => {
-  const show = await Show.findById(req.params.id);
-  if (!show) throw ApiError.notFound('Show not found');
-  if (show.status === 'CANCELLED') throw ApiError.badRequest('Show already cancelled');
-
-  show.status = 'CANCELLED';
-  await show.save();
-
-  // (Bookings for this show will be handled by refund flow in a later chunk.)
-  return ok(res, null, 'Show cancelled');
+  return ok(res, { show });
 });
 
 export const deleteShow = asyncHandler(async (req, res) => {
   const show = await Show.findById(req.params.id);
-  if (!show) throw ApiError.notFound('Show not found');
 
-  if (show.occupiedSeats?.some((s) => s.status === 'booked')) {
-    throw ApiError.conflict('Cannot delete: show has confirmed bookings. Cancel instead.');
+  if (!show) {
+    throw ApiError.notFound('Show not found');
   }
 
-  await Show.findByIdAndDelete(show._id);
-  return ok(res, null, 'Show deleted');
-});
+  if (show.occupiedSeats?.length) {
+    throw ApiError.badRequest('Cannot delete a show with occupied seats');
+  }
 
-// Available dates for a given movie ---------------------------------------
+  await show.deleteOne();
 
-export const availableDatesForMovie = asyncHandler(async (req, res) => {
-  const { movieId } = req.params;
-  if (!mongoose.isValidObjectId(movieId)) throw ApiError.badRequest('Invalid movie id');
-
-  const now = new Date();
-  const shows = await Show.find({
-    movie: movieId,
-    status: 'SCHEDULED',
-    endTime: { $gt: now },
-  }).select('date');
-
-  const dates = [...new Set(shows.map((s) => s.date.toISOString().slice(0, 10)))].sort();
-  return ok(res, { dates });
-});
-
-// Occupied seats for a show -----------------------------------------------
-
-export const occupiedSeatsForShow = asyncHandler(async (req, res) => {
-  const show = await Show.findById(req.params.id).select('occupiedSeats totalSeats');
-  if (!show) throw ApiError.notFound('Show not found');
-
-  const now = Date.now();
-  const active = show.occupiedSeats.filter(
-    (s) => s.status === 'booked' || (s.status === 'reserved' && s.expiresAt.getTime() > now)
-  );
-
-  return ok(res, {
-    totalSeats: show.totalSeats,
-    occupied: active.map((s) => ({ seatNumber: s.seatNumber, status: s.status })),
-    availableCount: show.totalSeats - active.length,
-  });
+  return ok(res, { message: 'Show deleted successfully' });
 });

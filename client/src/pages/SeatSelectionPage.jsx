@@ -35,30 +35,34 @@ export default function SeatSelectionPage() {
   const [submitting, setSubmitting] = useState(false);
 
   const load = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const [showRes, occupiedRes] = await Promise.all([
-        showsApi.get(showId),
-        showsApi.occupiedSeats(showId),
-      ]);
-      const showDoc = showRes.data.show;
-      setShow(showDoc);
+  setLoading(true);
+  setError(null);
 
-      const seatsRes = await seatsApi.listByScreen(showDoc.screen._id);
-      setSeats(seatsRes.data.seats || []);
+  try {
+    const showRes = await showsApi.get(showId);
+    const showDoc = showRes.data.show;
 
-      const map = new Map();
-      for (const o of occupiedRes.data.occupied || []) {
-        map.set(o.seatNumber, o.status);
-      }
-      setOccupied(map);
-    } catch (err) {
-      setError(extractApiError(err));
-    } finally {
-      setLoading(false);
+    setShow(showDoc);
+
+    const seatsRes = await seatsApi.listByScreen(
+      showDoc.screen._id
+    );
+
+    setSeats(seatsRes.data.seats || []);
+
+    const map = new Map();
+
+    for (const seat of showDoc.occupiedSeats || []) {
+      map.set(seat.seatNumber, seat.status);
     }
-  };
+
+    setOccupied(map);
+  } catch (err) {
+    setError(extractApiError(err));
+  } finally {
+    setLoading(false);
+  }
+};
 
   useEffect(() => {
     load();
@@ -141,7 +145,7 @@ export default function SeatSelectionPage() {
   return (
     <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
       <Link
-        to={`/movies/${movie._id}`}
+        to={`/movies/${movie.tmdbId}`}
         className="inline-flex items-center gap-1.5 text-sm text-ink-300 hover:text-white"
       >
         <ArrowLeft className="h-4 w-4" /> Back to movie

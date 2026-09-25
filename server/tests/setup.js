@@ -1,4 +1,4 @@
-import { MongoMemoryServer } from 'mongodb-memory-server';
+import { MongoMemoryReplSet } from 'mongodb-memory-server';
 import mongoose from 'mongoose';
 import { afterAll, afterEach, beforeAll } from 'vitest';
 
@@ -12,8 +12,14 @@ process.env.SEAT_RESERVATION_MINUTES = '10';
 let mongo;
 
 beforeAll(async () => {
-  mongo = await MongoMemoryServer.create();
+  mongo = await MongoMemoryReplSet.create({
+    replSet: {
+      count: 1,
+    },
+  });
+
   process.env.MONGODB_URI = mongo.getUri();
+
   await mongoose.connect(process.env.MONGODB_URI);
 });
 

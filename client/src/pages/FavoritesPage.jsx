@@ -12,7 +12,11 @@ export default function FavoritesPage() {
     <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
       <PageHeader
         title="Your favorites"
-        subtitle={favorites.length ? `${favorites.length} saved movies` : 'Movies you love'}
+        subtitle={
+          favorites.length
+            ? `${favorites.length} saved movies`
+            : 'Movies you love'
+        }
       />
 
       {favorites.length === 0 ? (
@@ -20,12 +24,22 @@ export default function FavoritesPage() {
           icon={Heart}
           title="No favorite movies yet"
           description="Tap the heart icon on any movie to save it here."
-          action={<Link to="/movies" className="btn-primary">Browse movies</Link>}
+          action={
+            <Link to="/movies" className="btn-primary">
+              Browse movies
+            </Link>
+          }
         />
       ) : (
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-          {favorites.map((m) => (
-            <MovieCard key={m._id} movie={m} onFavoriteToggle={(mv) => toggleFavorite(mv._id)} />
+          {favorites.map((movie) => (
+            <MovieCard
+              key={movie.tmdbId}
+              movie={movie}
+              onFavoriteToggle={(selectedMovie) =>
+                toggleFavorite(selectedMovie.tmdbId)
+              }
+            />
           ))}
         </div>
       )}

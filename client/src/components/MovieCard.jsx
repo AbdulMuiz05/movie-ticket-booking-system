@@ -5,7 +5,7 @@ import { useAuth } from '../hooks/useAuth.js';
 
 export default function MovieCard({ movie, onFavoriteToggle }) {
   const { isAuthenticated, isFavorite } = useAuth();
-  const fav = isFavorite?.(movie._id);
+const fav = isFavorite?.(movie.tmdbId);
 
   const handleFav = (e) => {
     e.preventDefault();
@@ -15,7 +15,7 @@ export default function MovieCard({ movie, onFavoriteToggle }) {
 
   return (
     <Link
-      to={`/movies/${movie._id}`}
+      to={`/movies/${movie.tmdbId}`}
       className="group card overflow-hidden transition hover:-translate-y-1 hover:border-brand-500/50"
     >
       <div className="relative aspect-[2/3] overflow-hidden bg-ink-800">

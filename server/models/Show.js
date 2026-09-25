@@ -1,5 +1,19 @@
 import mongoose from 'mongoose';
 
+const movieSnapshotSchema = new mongoose.Schema(
+  {
+    tmdbId: { type: Number, required: true },
+    title: { type: String, required: true },
+    poster: { type: String, default: '' },
+    backdrop: { type: String, default: '' },
+    duration: { type: Number, required: true, min: 1 },
+    language: { type: String, default: 'EN' },
+    rating: { type: Number, default: 0 },
+    genre: { type: [String], default: [] },
+  },
+  { _id: false }
+);
+
 const occupiedSeatSchema = new mongoose.Schema(
   {
     seatNumber: { type: String, required: true },
@@ -13,7 +27,7 @@ const occupiedSeatSchema = new mongoose.Schema(
 
 const showSchema = new mongoose.Schema(
   {
-    movie: { type: mongoose.Schema.Types.ObjectId, ref: 'Movie', required: true, index: true },
+    movie: { type: movieSnapshotSchema, required: true },
     cinema: { type: mongoose.Schema.Types.ObjectId, ref: 'Cinema', required: true, index: true },
     screen: { type: mongoose.Schema.Types.ObjectId, ref: 'Screen', required: true, index: true },
     date: { type: Date, required: true, index: true },
@@ -40,7 +54,7 @@ showSchema.virtual('availableSeats').get(function () {
   return this.totalSeats - active.length;
 });
 
-showSchema.index({ movie: 1, date: 1 });
+showSchema.index({ 'movie.tmdbId': 1, date: 1 });
 showSchema.index({ screen: 1, startTime: 1 }, { unique: true });
 
 export const Show = mongoose.model('Show', showSchema);

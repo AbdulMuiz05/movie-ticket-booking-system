@@ -14,13 +14,16 @@ import PageHeader from '../../components/PageHeader.jsx';
 import DataTable from '../../components/DataTable.jsx';
 import Modal from '../../components/Modal.jsx';
 import ConfirmDialog from '../../components/ConfirmDialog.jsx';
-import { formatCurrency, formatDateTime, statusTone } from '../../lib/formatters.js';
+import {
+  formatCurrency,
+  formatDateTime,
+  statusTone,
+} from '../../lib/formatters.js';
 
 const EMPTY = {
   movie: '',
   cinema: '',
   screen: '',
-  date: '',
   startTime: '',
   ticketPrice: 10,
 };
@@ -35,11 +38,25 @@ export default function AdminShowsPage() {
   const [confirmDelete, setConfirmDelete] = useState(null);
 
   const showsQuery = useApi(
-    () => adminApi.listShows({ status: statusFilter || undefined, page, limit: 20 }),
+    () =>
+      adminApi.listShows({
+        status: statusFilter || undefined,
+        page,
+        limit: 20,
+      }),
     [statusFilter, page]
   );
-  const moviesQuery = useApi(() => moviesApi.list({ limit: 100 }), []);
-  const cinemasQuery = useApi(() => cinemasApi.list({ limit: 100 }), []);
+
+  const moviesQuery = useApi(
+    () => moviesApi.list({ limit: 100 }),
+    []
+  );
+
+  const cinemasQuery = useApi(
+    () => cinemasApi.list({ limit: 100 }),
+    []
+  );
+
   const screensQuery = useApi(
     () =>
       form.cinema
@@ -55,69 +72,133 @@ export default function AdminShowsPage() {
   const screens = screensQuery.data?.data?.screens || [];
 
   useEffect(() => {
-    setForm((f) => {
-      if (!f.movie && movies.length) return { ...f, movie: movies[0]._id };
-      return f;
+    setForm((current) => {
+      if (!current.movie && movies.length) {
+        return {
+          ...current,
+          movie: String(movies[0].tmdbId),
+        };
+      }
+
+      return current;
     });
   }, [movies]);
 
   useEffect(() => {
-    setForm((f) => {
-      if (!f.cinema && cinemas.length) return { ...f, cinema: cinemas[0]._id };
-      return f;
+    setForm((current) => {
+      if (!current.cinema && cinemas.length) {
+        return {
+          ...current,
+          cinema: cinemas[0]._id,
+        };
+      }
+
+      return current;
     });
   }, [cinemas]);
 
   useEffect(() => {
-    setForm((f) => {
-      if (screens.length && !screens.find((s) => s._id === f.screen)) {
-        return { ...f, screen: screens[0]._id };
+    setForm((current) => {
+      if (
+        screens.length &&
+        !screens.find((screen) => screen._id === current.screen)
+      ) {
+        return {
+          ...current,
+          screen: screens[0]._id,
+        };
       }
-      return f;
+
+      return current;
     });
   }, [screens]);
 
   const openCreate = () => {
-    setForm((f) => ({
+    setForm({
       ...EMPTY,
-      movie: f.movie || movies[0]?._id || '',
-      cinema: f.cinema || cinemas[0]?._id || '',
+      movie: movies[0] ? String(movies[0].tmdbId) : '',
+      cinema: cinemas[0]?._id || '',
       screen: screens[0]?._id || '',
-    }));
+    });
+
     setModalOpen(true);
   };
 
   const save = async () => {
+    if (
+      !form.movie ||
+      !form.cinema ||
+      !form.screen ||
+      !form.startTime ||
+      form.ticketPrice === ''
+    ) {
+      toast.error('Please fill in all fields');
+      return;
+    }
+
+    const movie = movies.find(
+      (item) => String(item.tmdbId) === String(form.movie)
+    );
+
+    const screen = screens.find(
+      (item) => item._id === form.screen
+    );
+
+    if (!movie) {
+      toast.error('Selected TMDB movie was not found');
+      return;
+    }
+
+    if (!screen) {
+      toast.error('Selected screen was not found');
+      return;
+    }
+
     setSaving(true);
+
     try {
-      if (!form.movie || !form.cinema || !form.screen || !form.startTime || !form.ticketPrice) {
-        toast.error('Please fill in all fields');
-        return;
+      const startTime = new Date(form.startTime);
+
+      if (Number.isNaN(startTime.getTime())) {
+        throw new Error('Invalid start time');
       }
-      const startTime = new Date(form.startTime).toISOString();
-      const date = startTime.slice(0, 10);
+
+      const endTime = new Date(
+        startTime.getTime() +
+          Number(movie.duration || 120) * 60 * 1000
+      );
 
       await showsApi.create({
-        movie: form.movie,
+        tmdbMovieId: Number(movie.tmdbId),
         cinema: form.cinema,
         screen: form.screen,
-        date,
-        startTime,
+        date: startTime.toISOString(),
+        startTime: startTime.toISOString(),
+        endTime: endTime.toISOString(),
         ticketPrice: Number(form.ticketPrice),
+        totalSeats: Number(screen.capacity),
       });
+
       toast.success('Show created');
       setModalOpen(false);
       showsQuery.refetch();
     } catch (err) {
-      toast.error(extractApiError(err).message);
+      toast.error(
+        extractApiError(err).message || err.message
+      );
     } finally {
       setSaving(false);
     }
   };
 
   const doCancel = async () => {
+    if (!confirmCancel) return;
+
     try {
-      await showsApi.cancel(confirmCancel._id);
+      await showsApi.update(confirmCancel._id, {
+        status: 'CANCELLED',
+      });
+
       toast.success('Show cancelled');
       setConfirmCancel(null);
       showsQuery.refetch();
@@ -127,8 +208,11 @@ export default function AdminShowsPage() {
   };
 
   const doDelete = async () => {
+    if (!confirmDelete) return;
+
     try {
       await showsApi.remove(confirmDelete._id);
+
       toast.success('Show deleted');
       setConfirmDelete(null);
       showsQuery.refetch();
@@ -139,30 +223,57 @@ export default function AdminShowsPage() {
 
   const columns = useMemo(
     () => [
-      { key: 'movie', label: 'Movie', render: (s) => s.movie?.title },
+      {
+        key: 'movie',
+        label: 'Movie',
+        render: (show) => (
+          <div>
+            <p className="font-medium text-white">
+              {show.movie?.title || 'Unknown movie'}
+            </p>
+            <p className="text-xs text-ink-500">
+              TMDB ID: {show.movie?.tmdbId || '—'}
+            </p>
+          </div>
+        ),
+      },
       {
         key: 'cinema',
         label: 'Cinema / Screen',
-        render: (s) => `${s.cinema?.name} · ${s.screen?.name}`,
+        render: (show) =>
+          `${show.cinema?.name || '—'} · ${
+            show.screen?.name || '—'
+          }`,
       },
-      { key: 'startTime', label: 'Time', render: (s) => formatDateTime(s.startTime) },
-      { key: 'ticketPrice', label: 'Price', render: (s) => formatCurrency(s.ticketPrice) },
+      {
+        key: 'startTime',
+        label: 'Time',
+        render: (show) => formatDateTime(show.startTime),
+      },
+      {
+        key: 'ticketPrice',
+        label: 'Price',
+        render: (show) =>
+          formatCurrency(show.ticketPrice),
+      },
       {
         key: 'availableSeats',
         label: 'Seats',
-        render: (s) =>
-          `${(s.totalSeats || 0) - (s.occupiedSeats?.length || 0)} / ${s.totalSeats || 0}`,
+        render: (show) =>
+          `${show.availableSeats ?? 0} / ${
+            show.totalSeats || 0
+          }`,
       },
       {
         key: 'status',
         label: 'Status',
-        render: (s) => (
+        render: (show) => (
           <span
             className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase ${statusTone(
-              s.status?.toLowerCase()
+              show.status?.toLowerCase()
             )}`}
           >
-            {s.status}
+            {show.status}
           </span>
         ),
       },
@@ -170,19 +281,20 @@ export default function AdminShowsPage() {
         key: 'actions',
         label: '',
         align: 'right',
-        render: (s) => (
+        render: (show) => (
           <div className="flex justify-end gap-1">
-            {s.status === 'SCHEDULED' ? (
+            {show.status === 'SCHEDULED' ? (
               <button
-                onClick={() => setConfirmCancel(s)}
+                onClick={() => setConfirmCancel(show)}
                 className="rounded p-1.5 text-amber-300 hover:bg-amber-500/10"
                 title="Cancel show"
               >
                 <XCircle className="h-3.5 w-3.5" />
               </button>
             ) : null}
+
             <button
-              onClick={() => setConfirmDelete(s)}
+              onClick={() => setConfirmDelete(show)}
               className="rounded p-1.5 text-red-300 hover:bg-red-500/10"
               title="Delete"
             >
@@ -192,7 +304,6 @@ export default function AdminShowsPage() {
         ),
       },
     ],
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     []
   );
 
@@ -200,39 +311,55 @@ export default function AdminShowsPage() {
     <div>
       <PageHeader
         title="Shows"
-        subtitle="Schedule screenings across your cinemas"
+        subtitle="Schedule TMDB movies across your cinemas"
         actions={
-          <button onClick={openCreate} className="btn-primary">
+          <button
+            onClick={openCreate}
+            className="btn-primary"
+          >
             <Plus className="h-4 w-4" /> Add show
           </button>
         }
       />
 
       <div className="mb-4 flex items-center gap-2">
-        {['SCHEDULED', 'CANCELLED', 'COMPLETED', ''].map((s) => (
-          <button
-            key={s || 'ALL'}
-            onClick={() => {
-              setStatusFilter(s);
-              setPage(1);
-            }}
-            className={`rounded-full px-3 py-1.5 text-xs font-medium transition ${
-              statusFilter === s
-                ? 'bg-brand-500 text-white'
-                : 'bg-ink-800 text-ink-200 hover:bg-ink-700'
-            }`}
-          >
-            {s || 'All'}
-          </button>
-        ))}
+        {['SCHEDULED', 'CANCELLED', 'COMPLETED', ''].map(
+          (status) => (
+            <button
+              key={status || 'ALL'}
+              onClick={() => {
+                setStatusFilter(status);
+                setPage(1);
+              }}
+              className={`rounded-full px-3 py-1.5 text-xs font-medium transition ${
+                statusFilter === status
+                  ? 'bg-brand-500 text-white'
+                  : 'bg-ink-800 text-ink-200 hover:bg-ink-700'
+              }`}
+            >
+              {status || 'All'}
+            </button>
+          )
+        )}
       </div>
 
       <DataTable
         columns={columns}
         rows={shows}
-        loading={showsQuery.loading}
-        error={showsQuery.error}
-        empty={{ icon: CalendarRange, title: 'No shows' }}
+        loading={
+          showsQuery.loading ||
+          moviesQuery.loading ||
+          cinemasQuery.loading
+        }
+        error={
+          showsQuery.error ||
+          moviesQuery.error ||
+          cinemasQuery.error
+        }
+        empty={{
+          icon: CalendarRange,
+          title: 'No shows',
+        }}
         pagination={pagination}
         onPage={setPage}
       />
@@ -244,10 +371,19 @@ export default function AdminShowsPage() {
         disableClose={saving}
         footer={
           <>
-            <button onClick={() => setModalOpen(false)} className="btn-ghost" disabled={saving}>
+            <button
+              onClick={() => setModalOpen(false)}
+              className="btn-ghost"
+              disabled={saving}
+            >
               Cancel
             </button>
-            <button onClick={save} disabled={saving} className="btn-primary">
+
+            <button
+              onClick={save}
+              disabled={saving}
+              className="btn-primary"
+            >
               {saving ? 'Saving…' : 'Create show'}
             </button>
           </>
@@ -255,68 +391,155 @@ export default function AdminShowsPage() {
       >
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="sm:col-span-2">
-            <label className="label">Movie</label>
+            <label className="label">
+              Movie from TMDB
+            </label>
+
             <select
               value={form.movie}
-              onChange={(e) => setForm((f) => ({ ...f, movie: e.target.value }))}
+              onChange={(e) =>
+                setForm((current) => ({
+                  ...current,
+                  movie: e.target.value,
+                }))
+              }
               className="input"
             >
-              <option value="">Select movie</option>
-              {movies.map((m) => (
-                <option key={m._id} value={m._id}>
-                  {m.title}
+              <option value="">
+                Select movie
+              </option>
+
+              {movies.map((movie) => (
+                <option
+                  key={movie.tmdbId}
+                  value={movie.tmdbId}
+                >
+                  {movie.title}
+                  {movie.releaseDate
+                    ? ` (${movie.releaseDate.slice(0, 4)})`
+                    : ''}
                 </option>
               ))}
             </select>
           </div>
+
           <div>
-            <label className="label">Cinema</label>
+            <label className="label">
+              Cinema
+            </label>
+
             <select
               value={form.cinema}
-              onChange={(e) => setForm((f) => ({ ...f, cinema: e.target.value }))}
+              onChange={(e) =>
+                setForm((current) => ({
+                  ...current,
+                  cinema: e.target.value,
+                  screen: '',
+                }))
+              }
               className="input"
             >
-              <option value="">Select cinema</option>
-              {cinemas.map((c) => (
-                <option key={c._id} value={c._id}>
-                  {c.name}
+              <option value="">
+                Select cinema
+              </option>
+
+              {cinemas.map((cinema) => (
+                <option
+                  key={cinema._id}
+                  value={cinema._id}
+                >
+                  {cinema.name}
                 </option>
               ))}
             </select>
           </div>
+
           <div>
-            <label className="label">Screen</label>
+            <label className="label">
+              Screen
+            </label>
+
             <select
               value={form.screen}
-              onChange={(e) => setForm((f) => ({ ...f, screen: e.target.value }))}
+              onChange={(e) =>
+                setForm((current) => ({
+                  ...current,
+                  screen: e.target.value,
+                }))
+              }
               className="input"
             >
-              <option value="">Select screen</option>
-              {screens.map((s) => (
-                <option key={s._id} value={s._id}>
-                  {s.name}
+              <option value="">
+                Select screen
+              </option>
+
+              {screens.map((screen) => (
+                <option
+                  key={screen._id}
+                  value={screen._id}
+                >
+                  {screen.name} ({screen.capacity} seats)
                 </option>
               ))}
             </select>
           </div>
+
           <div className="sm:col-span-2">
-            <label className="label">Start time</label>
+            <label className="label">
+              Start time
+            </label>
+
             <input
               type="datetime-local"
               value={form.startTime}
-              onChange={(e) => setForm((f) => ({ ...f, startTime: e.target.value }))}
+              onChange={(e) =>
+                setForm((current) => ({
+                  ...current,
+                  startTime: e.target.value,
+                }))
+              }
               className="input"
             />
           </div>
+
           <div>
-            <label className="label">Ticket price</label>
+            <label className="label">
+              Ticket price
+            </label>
+
             <input
               type="number"
+              min="0"
               step="0.01"
               value={form.ticketPrice}
-              onChange={(e) => setForm((f) => ({ ...f, ticketPrice: e.target.value }))}
+              onChange={(e) =>
+                setForm((current) => ({
+                  ...current,
+                  ticketPrice: e.target.value,
+                }))
+              }
               className="input"
             />
+          </div>
+
+          <div>
+            <label className="label">
+              Movie duration
+            </label>
+
+            <div className="input bg-ink-900 text-ink-400">
+              {(() => {
+                const movie = movies.find(
+                  (item) =>
+                    String(item.tmdbId) ===
+                    String(form.movie)
+                );
+
+                return movie?.duration
+                  ? `${movie.duration} minutes`
+                  : 'Select a movie';
+              })()}
+            </div>
           </div>
         </div>
       </Modal>
@@ -324,7 +547,7 @@ export default function AdminShowsPage() {
       <ConfirmDialog
         open={Boolean(confirmCancel)}
         title="Cancel show?"
-        description="Any pending bookings will need to be refunded manually."
+        description="The show status will be changed to CANCELLED."
         confirmLabel="Cancel show"
         onConfirm={doCancel}
         onClose={() => setConfirmCancel(null)}
@@ -333,7 +556,7 @@ export default function AdminShowsPage() {
       <ConfirmDialog
         open={Boolean(confirmDelete)}
         title="Delete show?"
-        description="Shows with confirmed bookings cannot be deleted."
+        description="Shows with occupied seats cannot be deleted."
         confirmLabel="Delete"
         onConfirm={doDelete}
         onClose={() => setConfirmDelete(null)}

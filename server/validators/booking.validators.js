@@ -5,8 +5,15 @@ export const MAX_SEATS_PER_BOOKING = 5;
 export const createBookingRules = [
   body('showId').isMongoId().withMessage('Invalid show id'),
   body('seats')
-    .isArray({ min: 1, max: MAX_SEATS_PER_BOOKING })
-    .withMessage(`Select between 1 and ${MAX_SEATS_PER_BOOKING} seats`),
+  .isArray({ min: 1, max: MAX_SEATS_PER_BOOKING })
+  .withMessage(`Select between 1 and ${MAX_SEATS_PER_BOOKING} seats`)
+  .custom((seats) => {
+    if (new Set(seats).size !== seats.length) {
+      throw new Error('Duplicate seats are not allowed');
+    }
+
+    return true;
+  }),
   body('seats.*')
     .isString()
     .trim()
